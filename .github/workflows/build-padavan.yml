@@ -1,0 +1,80 @@
+name: Build K2P_nano-5.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Build Padavan'
+        required: true
+        default: 'build'
+  release:
+    types: [published]
+  push:
+    tags:
+    - 'v*'
+  watch:
+    types: [started]
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    if: github.event.repository.owner.id == github.event.sender.id
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@master
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install unzip libtool-bin curl cmake gperf gawk flex bison nano xxd fakeroot kmod \
+        cpio git python-docutils gettext automake autopoint texinfo build-essential help2man \
+        pkg-config zlib1g-dev libgmp3-dev libmpc-dev libmpfr-dev libncurses5-dev libltdl-dev wget libc-dev-bin
+    - name: Clone source code
+      run: |
+        sudo git clone --depth=1 https://github.com/hanwckf/rt-n56u.git /opt/rt-n56u
+        cd /opt/rt-n56u/toolchain-mipsel
+        sudo ./dl_toolchain.sh
+        sudo mkdir -p /opt/images/
+    - name: Build Firmware
+      env:
+        TNAME: K2P_nano-5.0
+      run: |
+        cd /opt/rt-n56u/trunk
+        if [ ! -f configs/templates/$TNAME.config ] ; then
+        echo "configs/templates/$TNAME.config not found "
+        exit 1
+        fi
+        cp -f configs/templates/$TNAME.config .config
+        sudo ./clear_tree
+        sudo ./build_firmware_modify $TNAME 0
+        sudo mv -f images/*.trx /opt/images/${TNAME}_Hanwckf_$(date +"%Y%m%d").trx
+    - name: Organize files
+      id: organize
+      run: |
+        echo "::set-output name=status::success"
+    - name: Upload packages - push to artifact file
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success'
+      with:
+        name: Padavan-packages
+        path: /opt/images
+      #上传到WeTransfer
+    - name: Upload firmware to WeTransfer
+      id: wetransfer
+      if: steps.organize.outputs.status == 'success'
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer wet  -s -p 16 --no-progress /opt/images/*.trx 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "::set-output name=status::success"
+      #上传到奶牛快传
+    - name: Upload firmware to cowtransfer
+      id: cowtransfer
+      if: steps.organize.outputs.status == 'success'
+      run: |
+        curl -sL https://git.io/cowtransfer | sh
+        ./cowtransfer-uploader -s -p 16 --hash /opt/images/*.trx 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+        echo "::set-output name=status::success"
